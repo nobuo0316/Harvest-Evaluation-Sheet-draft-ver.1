@@ -1,354 +1,172 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
-from datetime import date
 
-st.set_page_config(page_title="Farm Monthly Report", layout="wide")
+st.set_page_config(page_title="情報媒体 比較表", page_icon="📊", layout="wide")
 
 # -----------------------------
-# Helpers
+# Data
 # -----------------------------
-def init_session_state():
-    defaults = {
-        "work_rows": [
-            {"date": "", "task": "", "materials": "", "hours_or_people": ""}
-        ],
-        "expense_rows": [
-            {"date": "", "item": "", "amount": 0.0, "purpose": "", "receipt": "Yes"}
-        ],
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-
-def to_excel_bytes(summary_df: pd.DataFrame, work_df: pd.DataFrame, expense_df: pd.DataFrame) -> bytes:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        summary_df.to_excel(writer, index=False, sheet_name="Summary")
-        work_df.to_excel(writer, index=False, sheet_name="Work Log")
-        expense_df.to_excel(writer, index=False, sheet_name="Expenses")
-    return output.getvalue()
-
-
-def calc_report_score(on_time: bool, consistency: str, clarity: str, receipt_rate: float) -> tuple[float, float]:
-    score = 0
-
-    # 1) Timeliness: 20
-    score += 20 if on_time else 10
-
-    # 2) Consistency / completeness: 30
-    consistency_map = {
-        "Very good": 30,
-        "Good": 24,
-        "Average": 18,
-        "Needs improvement": 10,
-    }
-    score += consistency_map.get(consistency, 18)
-
-    # 3) Clarity: 20
-    clarity_map = {
-        "Very clear": 20,
-        "Clear": 16,
-        "Average": 12,
-        "Unclear": 6,
-    }
-    score += clarity_map.get(clarity, 12)
-
-    # 4) Receipt coverage: 30
-    if receipt_rate >= 1.0:
-        score += 30
-    elif receipt_rate >= 0.9:
-        score += 26
-    elif receipt_rate >= 0.75:
-        score += 20
-    elif receipt_rate >= 0.5:
-        score += 12
-    else:
-        score += 5
-
-    # Multiplier conversion
-    if score >= 90:
-        multiplier = 1.10
-    elif score >= 80:
-        multiplier = 1.05
-    elif score >= 70:
-        multiplier = 1.00
-    elif score >= 60:
-        multiplier = 0.95
-    else:
-        multiplier = 0.90
-
-    return float(score), float(multiplier)
-
-
-# -----------------------------
-# App
-# -----------------------------
-init_session_state()
-
-st.title("🌱 Monthly Farm Report & Evaluation")
-st.caption("Monthly report input + basic evaluation score (prototype)")
-
-with st.sidebar:
-    st.header("Evaluation Policy")
-    st.markdown(
-        """
-        **Current prototype formula**  
-        Evaluation Score = (Harvest / Area) × Land Difficulty Coefficient × Report Multiplier
-
-        - Harvest / Area = yield per ha
-        - Land Difficulty Coefficient = higher for harder land
-        - Report Multiplier = based on report quality and receipt coverage
-        """
-    )
-
-# -----------------------------
-# 1. Basic info
-# -----------------------------
-st.subheader("1. Basic Information")
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    employee_name = st.text_input("Employee Name")
-with col2:
-    plot_id = st.text_input("Plot ID")
-with col3:
-    report_month = st.text_input("Target Month", value=f"{date.today().year}-{date.today().month:02d}")
-with col4:
-    office = st.text_input("Office / Area")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    area_ha = st.number_input("Managed Area (ha)", min_value=0.01, value=1.00, step=0.01)
-with col2:
-    harvest_kg = st.number_input("Monthly Harvest (kg)", min_value=0.0, value=0.0, step=1.0)
-with col3:
-    cumulative_harvest_kg = st.number_input("Cumulative Harvest (kg)", min_value=0.0, value=0.0, step=1.0)
-
-col1, col2 = st.columns(2)
-with col1:
-    land_difficulty = st.selectbox(
-        "Land Difficulty",
-        options=[
-            "Standard (1.00)",
-            "Slightly Difficult (1.10)",
-            "Difficult (1.20)",
-            "Very Difficult (1.30)",
-        ],
-    )
-with col2:
-    weather_notes = st.text_area("Weather / Land Condition Notes", height=100)
-
-land_coeff_map = {
-    "Standard (1.00)": 1.00,
-    "Slightly Difficult (1.10)": 1.10,
-    "Difficult (1.20)": 1.20,
-    "Very Difficult (1.30)": 1.30,
-}
-land_coeff = land_coeff_map[land_difficulty]
-
-# -----------------------------
-# 2. Work logs
-# -----------------------------
-st.subheader("2. Work Log")
-col_a, col_b = st.columns([1, 4])
-with col_a:
-    if st.button("+ Add Work Row"):
-        st.session_state.work_rows.append(
-            {"date": "", "task": "", "materials": "", "hours_or_people": ""}
-        )
-with col_b:
-    st.caption("Examples: fertilizing, weeding, harvesting, irrigation, pest control")
-
-updated_work_rows = []
-for i, row in enumerate(st.session_state.work_rows):
-    c1, c2, c3, c4 = st.columns([1.2, 2.5, 2.0, 1.5])
-    with c1:
-        row_date = st.text_input(f"Date #{i+1}", value=row["date"], key=f"work_date_{i}")
-    with c2:
-        task = st.text_input(f"Task #{i+1}", value=row["task"], key=f"work_task_{i}")
-    with c3:
-        materials = st.text_input(f"Materials #{i+1}", value=row["materials"], key=f"work_materials_{i}")
-    with c4:
-        hours_or_people = st.text_input(
-            f"Hours/People #{i+1}", value=row["hours_or_people"], key=f"work_hours_{i}"
-        )
-    updated_work_rows.append(
-        {
-            "date": row_date,
-            "task": task,
-            "materials": materials,
-            "hours_or_people": hours_or_people,
-        }
-    )
-st.session_state.work_rows = updated_work_rows
-
-# -----------------------------
-# 3. Expense logs
-# -----------------------------
-st.subheader("3. Expense Report")
-col_a, col_b = st.columns([1, 4])
-with col_a:
-    if st.button("+ Add Expense Row"):
-        st.session_state.expense_rows.append(
-            {"date": "", "item": "", "amount": 0.0, "purpose": "", "receipt": "Yes"}
-        )
-with col_b:
-    st.caption("Examples: fertilizer, tools, transportation, irrigation supplies")
-
-updated_expense_rows = []
-for i, row in enumerate(st.session_state.expense_rows):
-    c1, c2, c3, c4, c5 = st.columns([1.2, 2.0, 1.2, 2.4, 1.0])
-    with c1:
-        row_date = st.text_input(f"Expense Date #{i+1}", value=row["date"], key=f"exp_date_{i}")
-    with c2:
-        item = st.text_input(f"Item #{i+1}", value=row["item"], key=f"exp_item_{i}")
-    with c3:
-        amount = st.number_input(f"Amount #{i+1}", min_value=0.0, value=float(row["amount"]), step=1.0, key=f"exp_amount_{i}")
-    with c4:
-        purpose = st.text_input(f"Purpose #{i+1}", value=row["purpose"], key=f"exp_purpose_{i}")
-    with c5:
-        receipt = st.selectbox(f"Receipt #{i+1}", ["Yes", "No"], index=0 if row["receipt"] == "Yes" else 1, key=f"exp_receipt_{i}")
-    updated_expense_rows.append(
-        {
-            "date": row_date,
-            "item": item,
-            "amount": amount,
-            "purpose": purpose,
-            "receipt": receipt,
-        }
-    )
-st.session_state.expense_rows = updated_expense_rows
-
-# -----------------------------
-# 4. Issues / next month plan
-# -----------------------------
-st.subheader("4. Issues / Next Month Plan")
-issues = st.text_area("Issues / Problems", height=120)
-actions = st.text_area("Actions Taken / Planned Next Month", height=120)
-
-# -----------------------------
-# 5. Report quality inputs
-# -----------------------------
-st.subheader("5. Report Quality Review")
-st.caption("For now, this can be filled by the manager or admin.")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    on_time = st.checkbox("Submitted on time", value=True)
-with col2:
-    consistency = st.selectbox("Completeness / Consistency", ["Very good", "Good", "Average", "Needs improvement"])
-with col3:
-    clarity = st.selectbox("Clarity", ["Very clear", "Clear", "Average", "Unclear"])
-
-# -----------------------------
-# Calculation
-# -----------------------------
-work_df = pd.DataFrame(st.session_state.work_rows)
-expense_df = pd.DataFrame(st.session_state.expense_rows)
-
-valid_expense_df = expense_df[
-    (expense_df["item"].astype(str).str.strip() != "") |
-    (expense_df["purpose"].astype(str).str.strip() != "") |
-    (expense_df["amount"] > 0)
-].copy()
-
-valid_work_df = work_df[
-    (work_df["task"].astype(str).str.strip() != "") |
-    (work_df["materials"].astype(str).str.strip() != "") |
-    (work_df["hours_or_people"].astype(str).str.strip() != "")
-].copy()
-
-if len(valid_expense_df) > 0:
-    receipt_rate = (valid_expense_df["receipt"] == "Yes").mean()
-    total_expense = float(valid_expense_df["amount"].sum())
-else:
-    receipt_rate = 1.0
-    total_expense = 0.0
-
-report_score, report_multiplier = calc_report_score(
-    on_time=on_time,
-    consistency=consistency,
-    clarity=clarity,
-    receipt_rate=receipt_rate,
-)
-
-yield_per_ha = harvest_kg / area_ha if area_ha > 0 else 0.0
-base_score = yield_per_ha * land_coeff
-final_score = base_score * report_multiplier
-
-# -----------------------------
-# 6. Results
-# -----------------------------
-st.subheader("6. Evaluation Result")
-r1, r2, r3, r4 = st.columns(4)
-r1.metric("Yield / ha", f"{yield_per_ha:,.2f} kg")
-r2.metric("Land Coefficient", f"{land_coeff:.2f}")
-r3.metric("Report Multiplier", f"{report_multiplier:.2f}")
-r4.metric("Final Score", f"{final_score:,.2f}")
-
-with st.expander("See detailed calculation"):
-    st.write(f"Base Score = (Harvest / Area) × Land Coefficient")
-    st.code(f"({harvest_kg:,.2f} / {area_ha:,.2f}) × {land_coeff:.2f} = {base_score:,.2f}")
-    st.write("Final Score = Base Score × Report Multiplier")
-    st.code(f"{base_score:,.2f} × {report_multiplier:.2f} = {final_score:,.2f}")
-    st.write(f"Report Review Score: {report_score:.0f} / 100")
-    st.write(f"Receipt Coverage: {receipt_rate*100:,.1f}%")
-
-# -----------------------------
-# 7. Data preview / export
-# -----------------------------
-st.subheader("7. Report Output")
-summary_df = pd.DataFrame([
+media_data = [
     {
-        "employee_name": employee_name,
-        "plot_id": plot_id,
-        "report_month": report_month,
-        "office": office,
-        "area_ha": area_ha,
-        "monthly_harvest_kg": harvest_kg,
-        "cumulative_harvest_kg": cumulative_harvest_kg,
-        "yield_per_ha": yield_per_ha,
-        "land_difficulty": land_difficulty,
-        "land_coefficient": land_coeff,
-        "weather_notes": weather_notes,
-        "issues": issues,
-        "actions_next_month": actions,
-        "submitted_on_time": on_time,
-        "consistency": consistency,
-        "clarity": clarity,
-        "receipt_rate": receipt_rate,
-        "report_score": report_score,
-        "report_multiplier": report_multiplier,
-        "base_score": base_score,
-        "final_score": final_score,
-        "total_expense": total_expense,
-        "work_log_count": len(valid_work_df),
-        "expense_count": len(valid_expense_df),
-    }
-])
+        "情報媒体名": "日経GX",
+        "サイト名": "日経GX - 脱炭素時代における変革のヒントを伝える",
+        "サイトURL": "https://project.nikkeibp.co.jp/gx/",
+        "金額": "法人1人 45,606円/年",
+        "比較基準": "（新エネルギー新聞 21,450円/年）",
+        "媒体": "メール / アプリ / サイト",
+        "主な特長": "テクノロジー・市場・政策を幅広く掲載 / 記者取材あり / サイト内検索あり / ランキングあり / 独自記事あり / 記事保存可 / 複数媒体で読める",
+        "懸念点": "バイオ系のタグ付けなし（ただし検索可能） / 新エネルギー新聞より高額",
+        "おすすめ度": "◎",
+        "向いている使い方": "幅広い業界動向の把握、保存・共有、検索ベースの情報収集",
+    },
+    {
+        "情報媒体名": "グリーンプロダクション",
+        "サイト名": "株式会社グリーンプロダクション",
+        "サイトURL": "https://greenproduction.co.jp/",
+        "金額": "無料",
+        "比較基準": "（新エネルギー新聞 21,450円/年）",
+        "媒体": "ウェブサイトのみ",
+        "主な特長": "G&B（グリーン・バイオ）分野に注力 / バイオ燃料のみ見やすい / 更新頻度は約3日に1件 / 参考URL記載あり / 展示会・イベント情報あり / 海外記事多め / 無料",
+        "懸念点": "今日更新分の一覧がない / 企業・団体から掲載希望可能 / サイト内検索なし",
+        "おすすめ度": "◎",
+        "向いている使い方": "バイオ燃料分野を絞って追う、海外トピック確認、無料の補完情報源",
+    },
+    {
+        "情報媒体名": "環境新聞",
+        "サイト名": "環境新聞オンライン",
+        "サイトURL": "https://www.kankyo-news.co.jp/",
+        "金額": "オンラインのみ 26,400円/年 / 紙面付き 34,980円/年",
+        "比較基準": "（新エネルギー新聞 21,450円/年）",
+        "媒体": "サイト / 紙",
+        "主な特長": "大判で通常6～12ページ / 月4回発行（毎週水曜） / サイト内検索あり / 日付・期間指定可 / 補助金や業務委託など公共情報あり / PDFで紙面アーカイブ確認可",
+        "懸念点": "新エネルギー新聞より高い / 紙面追加で年8,580円増 / 『脱炭素・エネルギー』中心で関連の薄い情報も混ざる",
+        "おすすめ度": "○",
+        "向いている使い方": "紙面やPDFで一覧性を重視したい場合、公共案件情報も追いたい場合",
+    },
+]
 
-st.dataframe(summary_df, use_container_width=True)
+comparison_df = pd.DataFrame(media_data)
 
-col1, col2 = st.columns(2)
+# URLをクリック可能にするため表示用列を追加
+comparison_df_display = comparison_df.copy()
+comparison_df_display["サイト"] = comparison_df_display.apply(
+    lambda row: f'<a href="{row["サイトURL"]}" target="_blank">{row["サイト名"]}</a>', axis=1
+)
+comparison_df_display = comparison_df_display[
+    [
+        "情報媒体名",
+        "サイト",
+        "金額",
+        "媒体",
+        "おすすめ度",
+        "向いている使い方",
+        "主な特長",
+        "懸念点",
+    ]
+]
+
+# -----------------------------
+# Header
+# -----------------------------
+st.title("情報媒体 比較表")
+st.caption("バイオマス事業の情報収集向けに、候補媒体を一目で比較できる表です。")
+
+# -----------------------------
+# Summary boxes
+# -----------------------------
+col1, col2, col3 = st.columns(3)
 with col1:
-    csv_data = summary_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        label="Download Summary CSV",
-        data=csv_data,
-        file_name=f"monthly_report_summary_{employee_name or 'employee'}_{report_month}.csv",
-        mime="text/csv",
-    )
+    st.metric("有料媒体数", "2")
 with col2:
-    excel_bytes = to_excel_bytes(summary_df, valid_work_df, valid_expense_df)
-    st.download_button(
-        label="Download Excel Report",
-        data=excel_bytes,
-        file_name=f"monthly_report_{employee_name or 'employee'}_{report_month}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    st.metric("無料媒体数", "1")
+with col3:
+    st.metric("推奨構成", "日経GX + グリーンプロダクション")
 
 st.markdown("---")
-st.caption(
-    "Next step candidates: bilingual UI, receipt image upload, monthly master list, manager approval flow, Supabase save, and ranking dashboard."
+
+# -----------------------------
+# Filters
+# -----------------------------
+left, right = st.columns([1, 2])
+with left:
+    selected_media = st.multiselect(
+        "表示する媒体を選択",
+        options=comparison_df["情報媒体名"].tolist(),
+        default=comparison_df["情報媒体名"].tolist(),
+    )
+
+with right:
+    keyword = st.text_input("キーワード検索（特長・懸念点・使い方）", placeholder="例：検索、海外、無料、PDF")
+
+filtered_df = comparison_df.copy()
+filtered_df = filtered_df[filtered_df["情報媒体名"].isin(selected_media)]
+
+if keyword:
+    mask = filtered_df.apply(
+        lambda row: row.astype(str).str.contains(keyword, case=False, na=False).any(), axis=1
+    )
+    filtered_df = filtered_df[mask]
+
+filtered_display = filtered_df.copy()
+filtered_display["サイト"] = filtered_display.apply(
+    lambda row: f'<a href="{row["サイトURL"]}" target="_blank">{row["サイト名"]}</a>', axis=1
 )
+filtered_display = filtered_display[
+    [
+        "情報媒体名",
+        "サイト",
+        "金額",
+        "媒体",
+        "おすすめ度",
+        "向いている使い方",
+        "主な特長",
+        "懸念点",
+    ]
+]
+
+# -----------------------------
+# Table
+# -----------------------------
+st.subheader("比較一覧")
+st.markdown(
+    filtered_display.to_html(escape=False, index=False),
+    unsafe_allow_html=True,
+)
+
+st.info("媒体名の比較だけでなく、サイト名クリックでそのまま対象サイトへ移動できます。")
+
+# -----------------------------
+# Conclusion
+# -----------------------------
+st.subheader("結論")
+st.markdown(
+    """
+**『日経GX』と『グリーンプロダクション』の併用が適している** と考えられます。
+
+**理由**
+- **日経GX**：記事数が多く、サイト内検索や保存機能があり、情報の深さと使いやすさに優れる。
+- **グリーンプロダクション**：無料で、バイオ燃料系や海外トピックを補完しやすい。
+- **環境新聞**：紙面・PDFの一覧性は魅力だが、費用と情報の広さの面で優先度は一段下がる。
+
+**検索結果メモ**
+- 「バイオマス発電」で1年分検索した場合：
+    - 環境新聞：19件
+    - 日経GX：31件
+
+**主な懸念点**
+- 日経GXは **45,606円/年** と、新エネルギー新聞 **21,450円/年** の約2.13倍。
+- 日経GX・グリーンプロダクションともに、紙面やPDFのような一覧性は弱く、記事ごとの確認が必要。
+"""
+)
+
+# -----------------------------
+# Raw data expander
+# -----------------------------
+with st.expander("元データを確認"):
+    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+
+# -----------------------------
+# Footer
+# -----------------------------
+st.markdown("---")
+st.caption("必要であれば次に、①稟議用の見た目に寄せる版 ②価格比較を色分けした版 ③スマホでも見やすいカード版 に変更できます。")
